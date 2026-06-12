@@ -7,16 +7,50 @@ let notificationQueue: Queue | null = null;
 
 const getNotificationQueue = () => {
   if (!notificationQueue) {
-    const connection = process.env.REDIS_URL
+    const base = process.env.REDIS_URL
       ? { url: process.env.REDIS_URL }
       : {
           host: process.env.REDIS_HOST ?? "127.0.0.1",
           port: Number(process.env.REDIS_PORT ?? 6379),
         };
-    
+
+    // Fail fast and bound reconnection so an unreachable Redis can never
+    // indefinitely block a request that enqueues a notification.
+    const connection = {
+      ...base,
+      connectTimeout: 5000,
+      retryStrategy: (times: number) => Math.min(times * 500, 5000),
+    };
+
     notificationQueue = new Queue("notifications", { connection });
+    // Avoid unhandled 'error' events crashing the process when Redis is down.
+    notificationQueue.on("error", (err) => {
+      console.error("Notification queue connection error:", err?.message ?? err);
+    });
   }
   return notificationQueue;
+};
+
+/**
+ * Enqueue a job but never wait longer than `timeoutMs`. If Redis is
+ * unreachable, BullMQ's offline command queue would otherwise wait forever;
+ * this guarantees the caller can fall back to the durable outbox instead.
+ */
+const enqueueWithTimeout = async (
+  jobName: string,
+  payload: Record<string, unknown>,
+  opts: Record<string, unknown>,
+  timeoutMs = 3000
+) => {
+  const addPromise = getNotificationQueue().add(jobName, payload, opts);
+  // Prevent an unhandled rejection if the add settles after we time out.
+  addPromise.catch(() => {});
+  await Promise.race([
+    addPromise,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("notification enqueue timed out")), timeoutMs)
+    ),
+  ]);
 };
 
 /**
@@ -140,74 +174,71 @@ export const createNotification = async (input: CreateNotificationInput) => {
       };
     }
 
-    const result = await prisma.$transaction(async (tx) => {
-      const notif = await tx.notification.create({
-        data: {
-          templateKey,
-          title,
-          body,
-          data,
-          category: data?.category,
-          createdBy,
-          recipients: {
-            create: recipients.map((r) => ({
-              userId: r.userId,
-              channels: r.channels ?? ["in_app", "email"],
-            })),
-          },
+    // Persist the notification first so the request never depends on Redis.
+    const notif = await prisma.notification.create({
+      data: {
+        templateKey,
+        title,
+        body,
+        data,
+        category: data?.category,
+        createdBy,
+        recipients: {
+          create: recipients.map((r) => ({
+            userId: r.userId,
+            channels: r.channels ?? ["in_app", "email"],
+          })),
         },
-        include: { recipients: true },
-      });
-
-      // try enqueueing
-      try {
-        await getNotificationQueue().add(
-          "processNotification",
-          { notificationId: notif.id },
-          {
-            removeOnComplete: true,
-            attempts: 5,
-            backoff: { type: "exponential", delay: 1000 },
-          }
-        );
-      } catch (queueErr) {
-        console.error(
-          "Failed to enqueue notification job; saving to outbox",
-          queueErr
-        );
-        // fallback: create outbox entries per recipient/channel
-        const outboxCreates = [];
-        for (const rec of notif.recipients) {
-          for (const channel of rec.channels || ["in_app"]) {
-            outboxCreates.push(
-              tx.notificationOutbox.create({
-                data: {
-                  notificationId: notif.id,
-                  payload: {
-                    recipientId: rec.id,
-                    channel,
-                    notification: {
-                      id: notif.id,
-                      title: notif.title,
-                      body: notif.body,
-                      data: notif.data,
-                    },
-                  },
-                  channel,
-                },
-              })
-            );
-          }
-        }
-        await Promise.all(outboxCreates);
-      }
-
-      return notif;
+      },
+      include: { recipients: true },
     });
+
+    // try enqueueing (bounded so an unreachable Redis can't block the request)
+    try {
+      await enqueueWithTimeout(
+        "processNotification",
+        { notificationId: notif.id },
+        {
+          removeOnComplete: true,
+          attempts: 5,
+          backoff: { type: "exponential", delay: 1000 },
+        }
+      );
+    } catch (queueErr) {
+      console.error(
+        "Failed to enqueue notification job; saving to outbox",
+        queueErr
+      );
+      // fallback: create outbox entries per recipient/channel
+      const outboxCreates = [];
+      for (const rec of notif.recipients) {
+        for (const channel of rec.channels || ["in_app"]) {
+          outboxCreates.push(
+            prisma.notificationOutbox.create({
+              data: {
+                notificationId: notif.id,
+                payload: {
+                  recipientId: rec.id,
+                  channel,
+                  notification: {
+                    id: notif.id,
+                    title: notif.title,
+                    body: notif.body,
+                    data: notif.data,
+                  },
+                },
+                channel,
+              },
+            })
+          );
+        }
+      }
+      await Promise.all(outboxCreates);
+    }
 
     return {
       success: true,
-      data: result,
+      data: notif,
     };
   } catch (error) {
     return {

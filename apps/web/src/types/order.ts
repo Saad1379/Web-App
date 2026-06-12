@@ -61,6 +61,7 @@ export interface BillingLineItem {
     id: string;
     employeeId: string;
     employee?: { firstName?: string | null; lastName?: string | null };
+    customerActivity?: { id: string; name: string; selectedPricingType?: string | null } | null;
   } | null;
   containerEmployee?: {
     id: string;

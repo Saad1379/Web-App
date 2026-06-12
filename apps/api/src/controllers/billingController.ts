@@ -31,7 +31,8 @@ export const getOrderBillingSummary = async (req: Request, res: Response) => {
       include: {
         assignment: {
           include: {
-            employee: { select: { id: true, firstName: true, lastName: true } }
+            employee: { select: { id: true, firstName: true, lastName: true } },
+            customerActivity: { select: { id: true, name: true, selectedPricingType: true } }
           }
         },
         containerEmployee: {

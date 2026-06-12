@@ -121,6 +121,7 @@ export const OrderBillingPanel = ({ orderId, isAdmin = false }: OrderBillingPane
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead>Activity</TableHead>
                     <TableHead>Method</TableHead>
                     <TableHead>Employee / Container</TableHead>
                     <TableHead className="text-right">Qty</TableHead>
@@ -131,6 +132,9 @@ export const OrderBillingPanel = ({ orderId, isAdmin = false }: OrderBillingPane
                 <TableBody>
                   {summary.lineItems.map((item) => (
                     <TableRow key={item.id}>
+                      <TableCell className="text-muted-foreground">
+                        {item.assignment?.customerActivity?.name ?? '—'}
+                      </TableCell>
                       <TableCell>
                         <Badge variant={METHOD_BADGE_VARIANTS[item.method]}>
                           {METHOD_LABELS[item.method]}
@@ -157,7 +161,7 @@ export const OrderBillingPanel = ({ orderId, isAdmin = false }: OrderBillingPane
                   ))}
                   {/* Grand total row */}
                   <TableRow className="border-t-2 font-bold">
-                    <TableCell colSpan={4} className="text-right">
+                    <TableCell colSpan={5} className="text-right">
                       Grand Total
                     </TableCell>
                     <TableCell className="text-right text-lg">

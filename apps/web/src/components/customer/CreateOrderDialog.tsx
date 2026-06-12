@@ -77,8 +77,8 @@ const CreateOrderDialog: React.FC<CreateOrderDialogProps> = ({
   const [templateData, setTemplateData] = useState<Record<string, string> | null>(null);
   const [templateLines, setTemplateLines] = useState<string[]>([]);
   const [containers, setContainers] = useState<Container[]>([]);
-  const [pieceEntries, setPieceEntries] = useState<Array<{ id: string; quantity: number; notes: string }>>([]);
-  const [hourEntries, setHourEntries] = useState<Array<{ id: string; quantity: number; notes: string }>>([]);
+  const [pieceEntries, setPieceEntries] = useState<Array<{ id: string; activityId: string; quantity: number; notes: string }>>([]);
+  const [hourEntries, setHourEntries] = useState<Array<{ id: string; activityId: string; quantity: number; notes: string }>>([]);
 
   const [formData, setFormData] = useState<CreateOrderData>({
     description: "",
@@ -256,8 +256,8 @@ const CreateOrderDialog: React.FC<CreateOrderDialogProps> = ({
           const allActivities: any[] = [];
           for (const activityId of selectedActivities) {
             const activity = activities.find(a => a.id === activityId);
-            const selectedPricingType = activityPricingSelections[activityId] || ((activity as any)?.pricingTypes?.[0] ?? null);
-            
+            const selectedPricingType = getSelectedPricingType(activityId) ?? null;
+
             const baseActivity = {
               activityId,
               basePrice: Number(activity?.basePrice) || 0,
@@ -271,16 +271,18 @@ const CreateOrderDialog: React.FC<CreateOrderDialogProps> = ({
                 quantity: containers.reduce((sum, c) => sum + c.cartonQuantity, 0),
               });
             } else if (selectedPricingType === 'PER_PIECE') {
-              if (pieceEntries.length > 0) {
-                pieceEntries.forEach(entry => {
+              const entries = pieceEntries.filter(e => e.activityId === activityId);
+              if (entries.length > 0) {
+                entries.forEach(entry => {
                   allActivities.push({ ...baseActivity, quantity: entry.quantity, notes: entry.notes });
                 });
               } else {
                 allActivities.push({ ...baseActivity, quantity: 1, notes: "" });
               }
             } else if (selectedPricingType === 'HOURLY') {
-              if (hourEntries.length > 0) {
-                hourEntries.forEach(entry => {
+              const entries = hourEntries.filter(e => e.activityId === activityId);
+              if (entries.length > 0) {
+                entries.forEach(entry => {
                   allActivities.push({ ...baseActivity, quantity: entry.quantity, notes: entry.notes });
                 });
               } else {
@@ -349,8 +351,10 @@ const CreateOrderDialog: React.FC<CreateOrderDialogProps> = ({
         }
       } else {
         setActivityPricingSelections(p => { const n = { ...p }; delete n[activityId]; return n; });
+        setPieceEntries(prev => prev.filter(e => e.activityId !== activityId));
+        setHourEntries(prev => prev.filter(e => e.activityId !== activityId));
       }
-      
+
       // Update both carton and article prices for all containers when activities change
       setTimeout(() => {
         setContainers(currentContainers => 
@@ -415,8 +419,11 @@ const CreateOrderDialog: React.FC<CreateOrderDialogProps> = ({
     return labels[pt] || pt;
   };
 
+  const getSelectedPricingType = (activityId: string): string | undefined =>
+    activityPricingSelections[activityId] || ((activities.find(a => a.id === activityId) as any)?.pricingTypes?.[0]);
+
   const getSelectedPricingTypes = () =>
-    selectedActivities.map(id => activityPricingSelections[id] || ((activities.find(a => a.id === id) as any)?.pricingTypes?.[0])).filter(Boolean) as string[];
+    selectedActivities.map(id => getSelectedPricingType(id)).filter(Boolean) as string[];
 
   const isTypeSelected = (type: string) => getSelectedPricingTypes().includes(type);
 
@@ -553,7 +560,16 @@ const CreateOrderDialog: React.FC<CreateOrderDialogProps> = ({
           <>
 
         <div className="flex justify-between items-center">
-          <h4 className="font-medium">{t("admin.orders.form.containers")} ({containers.length})</h4>
+          <div>
+            <h4 className="font-medium">{t("admin.orders.form.containers")} ({containers.length})</h4>
+            <p className="text-xs text-muted-foreground">
+              {selectedActivities
+                .filter(id => { const p = getSelectedPricingType(id); return p === 'PER_CARTON' || p === 'PER_ARTICLE'; })
+                .map(id => activities.find(a => a.id === id)?.name)
+                .filter(Boolean)
+                .join(', ')}
+            </p>
+          </div>
           <Button type="button" onClick={addContainer} size="sm">
             <Plus className="w-4 h-4 mr-2" />
             {t("admin.orders.form.addContainer")}
@@ -622,85 +638,72 @@ const CreateOrderDialog: React.FC<CreateOrderDialogProps> = ({
         </>
         )}
 
-        {isTypeSelected('PER_PIECE') && (
-          <div className="space-y-4 border-t pt-4">
-            <div className="flex justify-between items-center">
-              <h4 className="font-medium">{t("activities.pricingTypes.PER_PIECE", "Per Piece")} ({pieceEntries.length})</h4>
-              <Button type="button" onClick={() => setPieceEntries([...pieceEntries, { id: `piece-${Date.now()}`, quantity: 1, notes: "" }])} size="sm">
-                <Plus className="w-4 h-4 mr-2" />
-                {t("common.add", "Add")}
-              </Button>
-            </div>
-            {pieceEntries.length > 0 && (
-              <div className="space-y-4">
-                {pieceEntries.map((entry, idx) => (
-                  <div key={entry.id} className="border rounded-lg p-4 grid grid-cols-1 md:grid-cols-2 gap-4 relative">
-                    <Button
-                      type="button" variant="outline" size="sm" className="absolute top-2 right-2"
-                      onClick={() => setPieceEntries(pieceEntries.filter((_, i) => i !== idx))}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                    <div>
-                      <Label>{t("admin.orders.form.pieceQuantity")}</Label>
-                      <Input
-                        type="number" min="1" value={entry.quantity}
-                        onChange={(e) => setPieceEntries(pieceEntries.map((pe, i) => i === idx ? { ...pe, quantity: parseInt(e.target.value) || 0 } : pe))}
-                      />
-                    </div>
-                    <div>
-                      <Label>{t("common.notes", "Notes")}</Label>
-                      <Input
-                        value={entry.notes} placeholder={t("common.optional", "Optional")}
-                        onChange={(e) => setPieceEntries(pieceEntries.map((pe, i) => i === idx ? { ...pe, notes: e.target.value } : pe))}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
+        {/* Per-activity sub-forms for HOURLY / PER_PIECE activities */}
+        {selectedActivities.map((activityId) => {
+          const activity = activities.find(a => a.id === activityId);
+          const pt = getSelectedPricingType(activityId);
+          if (pt !== 'HOURLY' && pt !== 'PER_PIECE') return null;
 
-        {isTypeSelected('HOURLY') && (
-          <div className="space-y-4 border-t pt-4">
-            <div className="flex justify-between items-center">
-              <h4 className="font-medium">{t("activities.pricingTypes.HOURLY", "Hourly")} ({hourEntries.length})</h4>
-              <Button type="button" onClick={() => setHourEntries([...hourEntries, { id: `hour-${Date.now()}`, quantity: 1, notes: "" }])} size="sm">
-                <Plus className="w-4 h-4 mr-2" />
-                {t("common.add", "Add")}
-              </Button>
-            </div>
-            {hourEntries.length > 0 && (
-              <div className="space-y-4">
-                {hourEntries.map((entry, idx) => (
-                  <div key={entry.id} className="border rounded-lg p-4 grid grid-cols-1 md:grid-cols-2 gap-4 relative">
-                    <Button
-                      type="button" variant="outline" size="sm" className="absolute top-2 right-2"
-                      onClick={() => setHourEntries(hourEntries.filter((_, i) => i !== idx))}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                    <div>
-                      <Label>{t("admin.orders.form.hours", "Hours")}</Label>
-                      <Input
-                        type="number" min="1" step="0.5" value={entry.quantity}
-                        onChange={(e) => setHourEntries(hourEntries.map((he, i) => i === idx ? { ...he, quantity: parseFloat(e.target.value) || 0 } : he))}
-                      />
-                    </div>
-                    <div>
-                      <Label>{t("common.notes", "Notes")}</Label>
-                      <Input
-                        value={entry.notes} placeholder={t("common.optional", "Optional")}
-                        onChange={(e) => setHourEntries(hourEntries.map((he, i) => i === idx ? { ...he, notes: e.target.value } : he))}
-                      />
-                    </div>
-                  </div>
-                ))}
+          const isHourly = pt === 'HOURLY';
+          const entries = isHourly
+            ? hourEntries.filter(e => e.activityId === activityId)
+            : pieceEntries.filter(e => e.activityId === activityId);
+          const setEntries = isHourly ? setHourEntries : setPieceEntries;
+
+          const addEntry = () => setEntries(prev => [
+            ...prev,
+            { id: `${isHourly ? 'hour' : 'piece'}-${Date.now()}`, activityId, quantity: 1, notes: "" },
+          ]);
+          const updateEntry = (id: string, field: 'quantity' | 'notes', value: any) =>
+            setEntries(prev => prev.map(en => en.id === id ? { ...en, [field]: value } : en));
+          const removeEntry = (id: string) =>
+            setEntries(prev => prev.filter(en => en.id !== id));
+
+          return (
+            <div key={activityId} className="space-y-4 border rounded-lg p-4">
+              <div className="flex justify-between items-center">
+                <div>
+                  <h4 className="font-medium">{activity?.name}</h4>
+                  <p className="text-xs text-muted-foreground">
+                    {activity?.type?.replace(/_/g, ' ')} · {getPricingTypeLabel(pt)} ({entries.length})
+                  </p>
+                </div>
+                <Button type="button" onClick={addEntry} size="sm">
+                  <Plus className="w-4 h-4 mr-2" />
+                  {t("common.add", "Add")}
+                </Button>
               </div>
-            )}
-          </div>
-        )}
+              {entries.length > 0 && (
+                <div className="space-y-4">
+                  {entries.map((entry) => (
+                    <div key={entry.id} className="border rounded-lg p-4 grid grid-cols-1 md:grid-cols-2 gap-4 relative">
+                      <Button
+                        type="button" variant="outline" size="sm" className="absolute top-2 right-2"
+                        onClick={() => removeEntry(entry.id)}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                      <div>
+                        <Label>{isHourly ? t("admin.orders.form.hours", "Hours") : t("admin.orders.form.pieceQuantity")}</Label>
+                        <Input
+                          type="number" min="1" step={isHourly ? "0.5" : "1"} value={entry.quantity}
+                          onChange={(e) => updateEntry(entry.id, 'quantity', isHourly ? (parseFloat(e.target.value) || 0) : (parseInt(e.target.value) || 0))}
+                        />
+                      </div>
+                      <div>
+                        <Label>{t("common.notes", "Notes")}</Label>
+                        <Input
+                          value={entry.notes} placeholder={t("common.optional", "Optional")}
+                          onChange={(e) => updateEntry(entry.id, 'notes', e.target.value)}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
 
         {containers.length > 0 && (isTypeSelected('PER_CARTON') || isTypeSelected('PER_ARTICLE')) && (
           <div className="bg-muted/50 p-4 rounded-lg">

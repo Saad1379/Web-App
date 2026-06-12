@@ -503,8 +503,8 @@ export const OrderDetailPage: React.FC<OrderDetailPageProps> = ({
         </Card>
       )}
 
-      {/* Activities - Fallback if no containers */}
-      {(!containers || containers.length === 0) && (order as any)?.customerActivities && (order as any).customerActivities.length > 0 && (
+      {/* Activities - always list every activity in the order */}
+      {(order as any)?.customerActivities && (order as any).customerActivities.length > 0 && (
         <Card>
           <CardHeader>
             <CardTitle>{t("order.activitiesPricing")}</CardTitle>
@@ -517,18 +517,25 @@ export const OrderDetailPage: React.FC<OrderDetailPageProps> = ({
                     <p className="font-medium">
                       {customerActivity.name || t("order.unknownActivity")}
                     </p>
+                    <p className="text-xs text-muted-foreground">
+                      {customerActivity.type ? String(customerActivity.type).replace(/_/g, ' ') : ''}
+                      {customerActivity.selectedPricingType
+                        ? ` · ${String(customerActivity.selectedPricingType).replace(/_/g, ' ')}`
+                        : ''}
+                    </p>
                     <p className="text-sm text-muted-foreground">
                       {t("order.quantity")}: {customerActivity.quantity || 1}
+                      {customerActivity.notes ? ` — ${customerActivity.notes}` : ''}
                     </p>
                   </div>
                   <div className="text-right">
-                    {customerActivity.unitPrice && (
+                    {customerActivity.unitPrice != null && (
                       <>
                         <p className="font-medium text-lg">€{Number(customerActivity.unitPrice).toFixed(2)}</p>
                         <p className="text-xs text-muted-foreground">
                           Unit Price
                         </p>
-                        {customerActivity.lineTotal && (
+                        {customerActivity.lineTotal != null && (
                           <p className="text-sm font-semibold text-green-600 mt-1">
                             {t("order.total")}: €{Number(customerActivity.lineTotal).toFixed(2)}
                           </p>
